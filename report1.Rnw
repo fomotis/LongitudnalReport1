@@ -57,6 +57,9 @@ library(ggplot2)
 library(GGally)
 library(nlme)
 library(lme4)
+library(xtable)
+library(gridExtra)
+library(cowplot)
 #reading the data
 renaldata <- read_sas('./Data/renal.sas7bdat')
 #creating the long format
@@ -65,16 +68,48 @@ renaldata_long <- renaldata %>% gather(key='time',value='Haematocrit',-id,-age,-
 renaldata_long <- renaldata_long %>% mutate(time=gsub('HC','',time))
 #to avoid 06 becoming 6, it is recoded as 0.5
 renaldata_long <- renaldata_long %>% mutate(time=as.numeric(gsub('06','0.5',time)))
+#creating quadratic time
+renaldata_long <- renaldata_long %>% mutate(time2=time^2)
+#
+renaldata$cardio <- factor(renaldata$cardio,labels = c('No','Yes'))
+renaldata$reject <- factor(renaldata$reject,labels = c('No','Yes'))
+renaldata$male <- factor(renaldata$male,labels = c('Female','Male'))
+
+
 #writing the long data out as a sas dataset
 write_sas(renaldata_long,'./Data/renallong.sas7bdat')
 #Some summaries
-renalmean <- renaldata_long %>% group_by(time) %>% summarise(averagemeasure=mean(Haematocrit,na.rm=T),variance=var(Haematocrit,na.rm=T),nummeasure=sum(!is.na(Haematocrit))) #%>% gather(key='statistic',value='average',-time)
+renalmean <- renaldata_long %>% group_by(time) %>% summarise(averagemeasure=mean(Haematocrit,na.rm=T),variance=var(Haematocrit,na.rm=T),nummeasure=sum(!is.na(Haematocrit)))
+###Missing pattern
+missingpattern <- function(x){
+  y <- NULL
+    for(i in 1:nrow(x)){
+      a <- is.na(x[i,])
+      a[a==T] <- 'X'
+      a[a==F] <- '-'
+      y[i] <- paste0(a,collapse='')
+    }
+  return(y)
+}
+renaldata$mpattern <-  missingpattern(renaldata %>% dplyr::select(HC0,HC06,HC1,HC2,HC3,HC4,HC5,HC6,HC7,HC8,HC9,HC10))
+table(renaldata$mpattern)
+
+
+#variance over discrete time
 renalmean %>% ggplot(aes(x=time,y=variance)) + geom_point() + geom_line()
+renalmean %>% ggplot(aes(x=time,y=averagemeasure)) + geom_point() + geom_line(col=2) + ggtitle('Average Evolution') + ylab('Average Haematocrit level')
+
 #somebasic plots
 #patients profile
-renaldata_long %>% ggplot(aes(x=time,y=Haematocrit)) + geom_point(alpha=0.1) + geom_line(aes(group=id),alpha=0.3) + geom_smooth(se=F,method = 'loess',col=2)
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit)) + geom_line(aes(group=id),alpha=0.3,col=1) + ggtitle('Individual Patients profile') + geom_smooth(se=F,method = 'loess',col=2)
+
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit)) + ggtitle(' Average Haematocrit Evolution') + geom_smooth(se=F,method = 'loess',col=2)
+
 #patients profile by gender
-renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=factor(male))) + geom_point(alpha=0.3) + geom_line(aes(group=id),alpha=0.5) + geom_smooth(method = 'loess')
+renaldata_long$male <- factor(renaldata_long$male,labels = c('Female','Male'))
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=male)) + geom_line(aes(group=id),alpha=0.5) + ggtitle('Patients Profile by Gender') + geom_smooth(method = 'loess')
+###mean profile
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=male)) + ggtitle('Average Evolution by Gender') + geom_smooth(method = 'loess',se=F)
 #+  theme(axis.text = element_text(size = 8),
 #    legend.key = element_rect(fill = "white"),
 #    legend.background = element_rect(fill = "white"),
@@ -84,60 +119,238 @@ renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=factor(male))) + geom_
 #    panel.background = element_rect(fill = "grey40")
 #  )
 #patients profile by cardio
-renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=factor(cardio)))  + geom_smooth(method = 'loess',se=F)
+renaldata_long$cardio <- factor(renaldata_long$cardio,labels = c('No','Yes'))
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=cardio)) + geom_line(aes(group=id),alpha=0.5) + ggtitle('Patients Profile by Cardio-vascular Problems')+ geom_smooth(method = 'loess')
+#mean structure
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=cardio))  + geom_smooth(method = 'loess',se=F) + ggtitle('Average Evolution by Cardio-vascular Problems')
+
 #patients profile by reject
-renaldata_long %>% ggplot(aes(time,y=Haematocrit,colour=factor(reject))) + geom_smooth(method = 'loess',se=F)
+renaldata_long$reject <- factor(renaldata_long$reject,labels = c('No','Yes'))
+
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=reject)) + geom_line(aes(group=id),alpha=0.5) + ggtitle('Patients Profile by Graft Rejection') + geom_smooth(method = 'loess')
+#mean structure
+renaldata_long %>% ggplot(aes(x=time,y=Haematocrit,colour=reject)) + geom_smooth(method = 'loess',se=F) + ggtitle('Average Evolution by Graft Rejection')
 
 #+ stat_summary(fun.y='mean',colour='red',geom='point',size=3) 
 #renalmean %>% filter(statistic %in% c('averagelogmeasure')) %>% ggplot(aes(x=time,y=average,colour=statistic)) + geom_point() + geom_line()+ylim(c(0,40))
 #variance components
 renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit)) + geom_jitter()
-renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit)) + geom_boxplot()
+renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit))+ geom_boxplot() + ggtitle('Variance Function') + labs(x='time')
 #by gender
-renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit,colour=factor(male))) + geom_boxplot()
+renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit,colour=male)) + geom_boxplot()
 #by cardio
-renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit,colour=factor(cardio))) + geom_boxplot()
+renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit,colour=cardio)) + geom_boxplot()
 #by reject
-renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit,colour=factor(reject))) + geom_boxplot()
+renaldata_long %>% ggplot(aes(x=factor(time),y=Haematocrit,colour=reject)) + geom_boxplot()
+
 #correlation structure
 ggpairs(renaldata[,1:12],title='Relationships')
-cor(renaldata[complete.cases(renaldata[,1:12]),1:12])
+cov(log(renaldata[complete.cases(renaldata[,1:12]),1:12]))
 ###fitting the multivariate regression(quadratic mean structure)
 #creating time^2
 #renaldata_long <- renaldata_long %>% mutate(time2=time^2)
 #mod1 <- renaldata_long[complete.cases(renaldata_long),] %>% lme(Haematocrit~time+time2,data=.,random= ~1|time/id,correlation=corSymm(),method='ML')
-ggpairs(renaldata[,1:12])
-meanstructure <- loess(Haematocrit~time,data=renaldata_long)
+#ggpairs(renaldata[,1:12])
+###smooth variance functions
+resids2 <- as.numeric((loess(Haematocrit~time,data=renaldata_long)$residuals)^2)
+x <- as.numeric(loess(Haematocrit~time,data=renaldata_long)$x)
+plotdata <- tibble(x,resids2)
+ggplot(plotdata,aes(x,resids2)) + geom_point() + geom_smooth(method='loess',se=F) + labs(x='time',y='Squared Residuals') + ggtitle('Smoothed Variance Function')
+
+meanstructure <- lm(Haematocrit~time+time2,data=renaldata_long,x=T)
 #
-vardata <- tibble(time=as.vector(meanstructure$x),resid2=meanstructure$residuals^2)
-vardata$time <- factor(vardata$time)
-vardatas <- vardata %>% spread(key=time,value=resid2)
+vardata <- data.frame(meanstructure$x,resid2=meanstructure$residuals^2)
+tabtime <- table(vardata$time)
+x <- vector("list",length(unique(vardata$time)))
+for(i in 1:length(tabtime)){
+  x[[i]] <- rep(1:tabtime[[i]])
+}
+vardata$id <- unlist(x)
+#
+vardatas <- vardata %>% spread(time,resid2)
+#
+#cor(vardatas[complete.cases(vardatas),])
+ggpairs(vardatas[,-1])
+
 ggplot(vardata,aes(x=time,y=resid2)) + geom_point() + geom_smooth(method='loess',se=F)
+
+
+
 # Two stage analysis regression model)
 #simple regression
 r2 <- numeric(1160)
 sse2i <- numeric(1160)
 ssr2i <- numeric(1160)
 ni <- numeric(1160)
+pi <- numeric(1160)
+interceptlin <- numeric(1160)
+slopelin <- numeric(1160)
+seint <- numeric(1160)
+seslope <- numeric(1160)
 for(i in 1:1160){
   mod <- lm(Haematocrit~time,data=renaldata_long[(renaldata_long$id==i),],x=T)
   r2[[i]] <- summary(mod)$r.squared
   sse2i[[i]] <- sum(mod$residuals^2)
-  ssr2i[[i]] <- anova(mod)$`Sum Sq`
+  ssr2i[[i]] <- anova(mod)$`Sum Sq`[[1]]
   ni[[i]] <- length(mod$x[,1])
+  pi <- length(mod$coefficients)
+  interceptlin[[i]] <- mod$coefficients[[1]]
+  slopelin[[i]] <- mod$coefficients[[2]]
+  seint[[i]] <- summary(mod)$coefficients[,2][1]
+  seslope[[i]] <- summary(mod)$coefficients[,2][2]
 }
+lineardata <- tibble(r2,sse2i,ssr2i,ni,pi,interceptlin,slopelin,seslope,seint)
+r2metalinear <- sum(lineardata$ssr2i)/sum(lineardata$ssr2i+lineardata$sse2i)
+
 #quadratic 
 r2q <- numeric(1160)
 sse2qi <- numeric(1160)
 ssr2qi <- numeric(1160)
 nqi <- numeric(1160)
+pqi <- numeric(1160)
+interceptquad <- numeric(1160)
+slopequad <- numeric(1160)
+slopequad2 <- numeric(1160)
+quadseint <- numeric(1160)
+quadseslope1 <- numeric(1160)
+quadseslope2 <- numeric(1160)
+
 for(i in 1:1160){
   mod <- lm(Haematocrit~time+time2,data=renaldata_long[(renaldata_long$id==i),],x=T)
   r2q[[i]] <- summary(mod)$r.squared
   sse2qi[[i]] <- sum(mod$residuals^2)
   ssr2qi[[i]] <- anova(mod)$`Sum Sq`[[1]]
   nqi[[i]] <- length(mod$x[,1])
+  pqi <- length(mod$coefficients)
+  interceptquad[[i]] <- mod$coefficients[[1]]
+  slopequad[[i]] <- mod$coefficients[[2]]
+  slopequad2[[i]] <- mod$coefficients[[3]]
+  quadseint[[i]] <- summary(mod)$coefficients[,2][1]
+  quadseslope1[[i]] <- summary(mod)$coefficients[,2][2]
+  quadseslope2[[i]] <- summary(mod)$coefficients[,2][3]
 }
+quadraticdata <- tibble(r2q,sse2qi,ssr2qi,nqi,pqi,interceptquad,slopequad,slopequad2,quadseint,quadseslope1,quadseslope2)
+#r2 meta
+r2metaquadratic <- sum(quadraticdata$ssr2qi)/sum(quadraticdata$ssr2qi+quadraticdata$sse2qi)
+
+#linear plot
+linplot <- lineardata %>% ggplot(aes(x=ni,y=r2)) + geom_point(col=1) + geom_hline(yintercept = r2metalinear,colour=2) + ggtitle('R^2 Linear Time')
+
+#quadratic plot
+quadplot <- quadraticdata %>% ggplot(aes(x=nqi,y=r2q)) + geom_point(col=1) + geom_hline(yintercept = r2metaquadratic,colour=2) + ggtitle('R^2 Quadratic Time')
+
+#plot_grid(linplot,quadplot)
+
+write_csv(quadraticdata[,6:8],'randomintslope.csv')
+
+##computing Fmeta
+pstar <- lineardata$pi
+ppstar <- quadraticdata$pqi
+t <- pstar + ppstar
+t2 <- ppstar - pstar
+
+Fmeta <- (sum(lineardata$sse2i[lineardata$ni >= t] - quadraticdata$sse2qi[lineardata$ni >= t])/sum(t2[lineardata$ni >= t])) / (sum(quadraticdata$sse2qi[lineardata$ni >= t])/sum(lineardata$ni[lineardata$ni >= t] - ppstar[lineardata$ni >= t]))
+
+(sum(lineardata$sse2i - quadraticdata$sse2qi)/sum(pstar)) / (sum(quadraticdata$sse2qi)/sum(lineardata$ni - t))
+
+#pval fmeta
+pf(Fmeta,sum(t2[lineardata$ni >= t]),sum(lineardata$ni[lineardata$ni >= t] - ppstar[lineardata$ni >= t]),lower.tail = F)
+
+# ##cubic
+# r2c <- numeric(1160)
+# sse2ci <- numeric(1160)
+# ssr2ci <- numeric(1160)
+# nci <- numeric(1160)
+# pci <- numeric(1160)
+# renaldata_long$time3 <- renaldata_long$time^3
+# 
+# for(i in 1:1160){
+#   mod <- lm(Haematocrit~time+time2+time3,data=renaldata_long[(renaldata_long$id==i),],x=T)
+#   r2c[[i]] <- summary(mod)$r.squared
+#   sse2ci[[i]] <- sum(mod$residuals^2)
+#   ssr2ci[[i]] <- anova(mod)$`Sum Sq`[[1]]
+#   nci[[i]] <- length(mod$x[,1])
+#   pci <- length(mod$coefficients)
+# }
+# cubicdata <- tibble(r2c,sse2ci,ssr2ci,nci,pci)
+# 
+# r2metacubic <- sum(cubicdata$ssr2ci)/sum(cubicdata$ssr2ci+cubicdata$sse2ci)
+# cubplot <- cubicdata %>% ggplot(aes(x=nci,y=r2c)) + geom_point(col=3) + geom_hline(yintercept = r2metacubic,colour=2) + ggtitle('R^2 Linear Time')
+# 
+# #Fmeta again
+# pstar <- cubicdata$pci - quadraticdata$pqi
+# ppstar <- cubicdata$pci + pstar
+# Fmeta <- (sum(quadraticdata$sse2qi[lineardata$ni >= ppstar] - cubicdata$sse2ci[lineardata$ni >= ppstar])/sum(pstar[lineardata$ni >= ppstar])) / (sum(cubicdata$sse2ci[lineardata$ni >= ppstar])/sum(lineardata$ni - cubicdata$pci - pstar))
+
+#####Imagine quadratic to be the best
+#using intercepts as response alone
+#renaldata$male <- relevel(renaldata$male,ref='Female')
+#renaldata$cardio <- relevel(renaldata$cardio,ref='No')
+#renaldata$reject <- relevel(renaldata$reject,ref='No')
+#2nd stage
+modelint <- lm(quadraticdata$interceptquad~renaldata$age+renaldata$male+renaldata$cardio+renaldata$reject,weights = quadraticdata$quadseint)
+
+#using linear time slope
+modelint2 <- lm(quadraticdata$slopequad~renaldata$age+renaldata$male+renaldata$cardio+renaldata$reject,weights = quadraticdata$quadseslope1)
+#using quadratic time slope
+modelint3 <- lm(quadraticdata$slopequad2~renaldata$age+renaldata$male+renaldata$cardio+renaldata$reject,weights = quadraticdata$quadseslope2)
+
+#Imagine linear model to be the best
+#using intercepts as response
+modellin <- lm(lineardata$interceptlin~renaldata$age+renaldata$male+renaldata$cardio+renaldata$reject,weights = lineardata$seint)
+#
+modellin2 <- lm(lineardata$slopelin~renaldata$age+renaldata$male+renaldata$cardio+renaldata$reject,weights = lineardata$seslope)
+
+
+
+
+
+
+
+
+
+
+# multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+#   library(grid)
+# 
+#   # Make a list from the ... arguments and plotlist
+#   plots <- c(list(...), plotlist)
+# 
+#   numPlots = length(plots)
+# 
+#   # If layout is NULL, then use 'cols' to determine layout
+#   if (is.null(layout)) {
+#     # Make the panel
+#     # ncol: Number of columns of plots
+#     # nrow: Number of rows needed, calculated from # of cols
+#     layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+#                     ncol = cols, nrow = ceiling(numPlots/cols))
+#   }
+# 
+#  if (numPlots==1) {
+#     print(plots[[1]])
+# 
+#   } else {
+#     # Set up the page
+#     grid.newpage()
+#     pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+# 
+#     # Make each plot, in the correct location
+#     for (i in 1:numPlots) {
+#       # Get the i,j matrix positions of the regions that contain this subplot
+#       matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+# 
+#       print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+#                                       layout.pos.col = matchidx$col))
+#     }
+#   }
+# }
+
+#multiplot(linplot,quadplot)
+
+
+
+
 #renalreg <- renaldata_long %>% group_by(id) %>% mutate(r2=summary(lm(Haematocrit~time,data=.))$r.squared)
 @
 +age+age*time+age*time2+male+male*time+male*time2+cardio+cardio*time+cardio*time2+reject*time+reject*time2
